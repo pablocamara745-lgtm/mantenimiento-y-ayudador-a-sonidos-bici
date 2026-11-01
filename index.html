@@ -1117,10 +1117,11 @@ const vBike=()=>{
 };
 
 function render(){
+const VALID_TABS=["home","noise","audio","sos","shop","calc","bike"];if(!VALID_TABS.includes(st.tab))st.tab="home";
 document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current",b.dataset.v===st.tab));
 document.getElementById("mine").textContent=[st.m,st.tipo].filter(Boolean).join(" · ");
 document.querySelectorAll(".theme-pill").forEach(p=>p.setAttribute("aria-pressed",p.dataset.v===st.theme));
-app.innerHTML=({home:vHome,noise:vNoise,audio:vAudio,sos:vSos,shop:vShop,calc:vCalc,bike:vBike,search:vSearch})[st.tab]();
+app.innerHTML=({home:vHome,noise:vNoise,audio:vAudio,sos:vSos,shop:vShop,calc:vCalc,bike:vBike})[st.tab]();
 }
 
 const go=()=>{render();scrollTo(0,0)};
