@@ -448,21 +448,22 @@ const CATS=["Todas","Transmisión","Frenos","Ruedas","Dirección y cuadro","Susp
 const DIFS=["Todas","Fácil","Media","Taller"];
 
 const st={
-  tab:"home",nv:"wiz",i:0,sub:"zona",ask:false,fin:false,
+  tab:"home",rideLog:[],setupLog:[],gChecks:{},diagSusp:"Fuga",tuneSymptom:"Se hunde al frenar",nv:"wiz",i:0,sub:"zona",ask:false,fin:false,
   m:"",tipo:"XC / Cross Country",shock:"air_inline",fork:"trail",drivetrain:"1x12_mech",fr:"disco_hid",
   theme:"mint",w:new Set,s:new Set,z:new Set,t:new Set,qa:[],more:false,cur:"",zv:{},q:"",shop:"tareas",cat:"Todas",dif:"Todas",done:{},
-  calcWeight:75,calcBike:"Trail / All-Mountain",calcWidth:"2.4",calcSystem:"tubeless",calcUnit:"bar",
+  calcWeight:75,calcBike:"Trail / All-Mountain",calcWidth:"2.4",calcSystem:"tubeless",calcSuspension:"doble",calcForkModel:"zeb",calcShockModel:"super_deluxe",calcForkYear:2026,calcShockYear:2026,calcFrameModel:"",calcRiding:"trail",calcInsert:"none",coilRearLoad:60,coilLeverage:2.5,coilStroke:60,coilSag:30,forkSagMeasured:"",shockSagMeasured:"",calcUnit:"bar",
   audioState:"idle",audioFreq:0,audioBPM:0,audioZone:"Transmisión o pedalier",audioConfidence:"Pendiente"
 };
 
 const ls={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-Object.assign(st,ls.get("bici-perfil",{}));st.done=ls.get("bici-hechos",{});
+Object.assign(st,ls.get("bici-perfil",{}));st.done=ls.get("bici-hechos",{});Object.assign(st,ls.get("bici-garage",{}));
 if(!st.theme)st.theme="mint";
 document.documentElement.setAttribute("data-style",st.theme);
 
 const app=document.getElementById("app"),dlg=document.getElementById("dlg");
 const esc=s=>String(s||"").replace(/[&<>"]/g,c=>"&#"+c.charCodeAt(0)+";"),n2=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
 const ago=d=>{const n=Math.floor((Date.now()-d)/864e5);return n<1?"hoy":n===1?"ayer":"hace "+n+" días"};
+const saveGarage=()=>ls.set("bici-garage",{rideLog:st.rideLog||[],setupLog:st.setupLog||[],gChecks:st.gChecks||{},diagSusp:st.diagSusp,tuneSymptom:st.tuneSymptom});
 const save=()=>ls.set("bici-perfil",{m:st.m,tipo:st.tipo,shock:st.shock,fork:st.fork,drivetrain:st.drivetrain,fr:st.fr,theme:st.theme});
 const card=(a,v,t,e,on,k="",sm="")=>`<button class="opt${sm}" data-a="${a}" ${k?`data-k="${k}" `:""}data-v="${v}" aria-pressed="${on}">${e?`<b>${e}</b>`:""}${t}</button>`;
 
@@ -474,6 +475,7 @@ const TABS=[
   ["sos","🩹","SOS Ruta"],
   ["shop","🛠️","Taller"],
   ["calc","🎛️","Presiones"],
+  ["garage","🧰","Ruta/setup"],
   ["bike","🚲","Mi bici"]
 ];
 document.getElementById("tabs").innerHTML=TABS.map(([v,e,n])=>`<button data-a="tab" data-v="${v}"><b>${e}</b>${n}</button>`).join("");
@@ -908,15 +910,36 @@ const vCalc=()=>{
     baseBarRear += 0.2;
   }
 
-  const pFrontBar = Math.max(1.0, Math.min(8.0, baseBarFront)).toFixed(2);
-  const pRearBar = Math.max(1.1, Math.min(8.5, baseBarRear)).toFixed(2);
+  // CushCore indica que muchas personas prefieren reducir 1–5 PSI al usar inserto.
+  // 3 PSI es un ajuste inicial; mousse/inserto no garantiza que sea el valor óptimo para cada cubierta.
+  const insertReductionPsi = isTubeless && ["mousse","insert"].includes(st.calcInsert) ? 3 : 0;
+  const insertReductionBar = insertReductionPsi / 14.5038;
+  const pFrontBar = Math.max(1.0, Math.min(8.0, baseBarFront - insertReductionBar)).toFixed(2);
+  const pRearBar = Math.max(1.1, Math.min(8.5, baseBarRear - insertReductionBar)).toFixed(2);
   const pFrontPsi = Math.round(pFrontBar * 14.5038);
   const pRearPsi = Math.round(pRearBar * 14.5038);
 
   // Cálculo de SAG y presión de amortiguador/horquilla
-  const forkPsi = Math.round(w * 1.15 + (st.calcBike.includes("eMTB") ? 15 : 0));
-  const shockPsi = Math.round(w * 2.3 + (st.calcBike.includes("eMTB") ? 25 : 0));
-  const sagPercent = st.calcBike.includes("Enduro") ? "30–35 % (descenso y tracción)" : st.calcBike.includes("XC") ? "20–25 % (firmeza)" : "25–30 % (polivalente)";
+  // Estimación inicial por peso, recorrido y estilo; afinar siempre midiendo el SAG.
+  const styleFactor = ({xc:1.06,trail:1,enduro:0.98,tecnico:0.97,saltos:1.05,drops:1.05,escaleras:1.03,descenso:0.95})[st.calcRiding] || 1;
+  const travelFactor = st.calcSuspension==="160"?1.02:st.calcSuspension==="170"?1.04:st.calcSuspension==="180"?1.06:st.calcSuspension==="150"?1.01:st.calcSuspension==="120"?0.98:1;
+  const forkPsi = Math.round((w * 1.15 + (st.calcBike.includes("eMTB") ? 15 : 0)) * styleFactor * travelFactor);
+  const shockPsi = Math.round((w * 2.3 + (st.calcBike.includes("eMTB") ? 25 : 0)) * styleFactor);
+  const coilRearN = w * (Number(st.coilRearLoad)||60) / 100 * 9.80665;
+  const coilStrokeMm = Number(st.coilStroke)||60;
+  const coilSagFraction = (Number(st.coilSag)||30) / 100;
+  const coilRateN = (coilRearN * (Number(st.coilLeverage)||2.5) / (coilStrokeMm * coilSagFraction)).toFixed(1);
+  const coilRateLb = Math.round(Number(coilRateN) * 5.710147).toString();
+  const coilNearest = Math.max(25, Math.round(Number(coilRateLb) / 25) * 25);
+  const targetForkSag = ({xc:17.5,trail:20,enduro:22.5,tecnico:22.5,saltos:20,drops:20,escaleras:22.5,descenso:25})[st.calcRiding] || 20;
+  const targetShockSag = ({xc:25,trail:28,enduro:30,tecnico:30,saltos:28,drops:28,escaleras:30,descenso:30})[st.calcRiding] || 28;
+  const forkTravelForSag = Number(st.calcSuspension) || 160;
+  const forkSagValue = Number(st.forkSagMeasured) || 0;
+  const shockSagValue = Number(st.shockSagMeasured) || 0;
+  const forkSagPct = forkSagValue ? (forkSagValue / forkTravelForSag * 100).toFixed(1) : "—";
+  const shockSagPct = shockSagValue ? (shockSagValue / (Number(st.coilStroke)||60) * 100).toFixed(1) : "—";
+  const sagAdvice = (measured,target) => !measured ? "Introduce la medida con el ciclista equipado." : measured > target+2.5 ? "SAG alto: prueba a añadir aire poco a poco." : measured < target-2.5 ? "SAG bajo: prueba a quitar aire poco a poco." : "Dentro del objetivo orientativo; comprueba sensaciones y recorrido usado.";
+  const sagPercent = `Horquilla ${targetForkSag}% · amortiguador ${targetShockSag}% (objetivos iniciales)`;
 
   return `
   <section class="card">
@@ -946,7 +969,68 @@ const vCalc=()=>{
       </div>
     </div>
 
-    <div class="opts" style="grid-template-columns:1fr 1fr; margin-bottom:16px;">
+      <div>
+        <label class="zn"><b>Suspensión / recorrido de horquilla:</b></label>
+        <select id="inp-suspension">
+          <option value="rigida" ${st.calcSuspension==="rigida"?'selected':''}>Rígida / sin suspensión</option>
+          <option value="120" ${st.calcSuspension==="120"?'selected':''}>Horquilla 120 mm (XC)</option>
+          <option value="140" ${st.calcSuspension==="140"?'selected':''}>Horquilla 140 mm (Trail)</option>
+          <option value="150" ${st.calcSuspension==="150"?'selected':''}>Horquilla 150 mm (Enduro)</option>
+          <option value="160" ${st.calcSuspension==="160"?'selected':''}>RockShox ZEB 160 mm</option>
+          <option value="170" ${st.calcSuspension==="170"?'selected':''}>RockShox ZEB 170 mm</option>
+          <option value="180" ${st.calcSuspension==="180"?'selected':''}>Horquilla 180 mm (Freeride / DH)</option>
+          <option value="doble" ${st.calcSuspension==="doble"?'selected':''}>Doble suspensión (recorrido trasero según cuadro)</option>
+        </select>
+      </div>
+      <div>
+        <label class="zn"><b>Horquilla (marca / modelo):</b></label>
+        <select id="inp-fork-model">
+          <option value="fox32" ${st.calcForkModel==="fox32"?'selected':''}>FOX 32 Step-Cast</option>
+          <option value="fox34" ${st.calcForkModel==="fox34"?'selected':''}>FOX 34 / 34 SL</option>
+          <option value="foxpodium" ${st.calcForkModel==="foxpodium"?'selected':''}>FOX Podium</option>
+          <option value="sid" ${st.calcForkModel==="sid"?'selected':''}>RockShox SID / SID SL</option>
+          <option value="domain" ${st.calcForkModel==="domain"?'selected':''}>RockShox Domain</option>
+          <option value="boxxer" ${st.calcForkModel==="boxxer"?'selected':''}>RockShox BoXXer</option>
+          <option value="fox36" ${st.calcForkModel==="fox36"?'selected':''}>Fox 36</option>
+          <option value="fox38" ${st.calcForkModel==="fox38"?'selected':''}>Fox 38</option>
+          <option value="rockshox_pike" ${st.calcForkModel==="rockshox_pike"?'selected':''}>RockShox Pike</option>
+          <option value="rockshox_lyrik" ${st.calcForkModel==="rockshox_lyrik"?'selected':''}>RockShox Lyrik</option>
+          <option value="zeb" ${st.calcForkModel==="zeb"?'selected':''}>RockShox ZEB</option>
+          <option value="other" ${st.calcForkModel==="other"?'selected':''}>Otra / no especificada</option>
+        </select>
+      </div>
+      <div>
+        <label class="zn"><b>Amortiguador trasero (marca / modelo):</b></label>
+        <select id="inp-shock-model">
+          <option value="fox_dps" ${st.calcShockModel==="fox_dps"?'selected':''}>FOX Float DPS</option>
+          <option value="fox_dhx2" ${st.calcShockModel==="fox_dhx2"?'selected':''}>FOX DHX2 (muelle)</option>
+          <option value="super_deluxe_coil" ${st.calcShockModel==="super_deluxe_coil"?'selected':''}>RockShox Super Deluxe Coil</option>
+          <option value="vivid_coil" ${st.calcShockModel==="vivid_coil"?'selected':''}>RockShox Vivid Coil</option>
+          <option value="fox_float_x" ${st.calcShockModel==="fox_float_x"?'selected':''}>Fox Float X</option>
+          <option value="fox_float_x2" ${st.calcShockModel==="fox_float_x2"?'selected':''}>Fox Float X2</option>
+          <option value="fox_dhx" ${st.calcShockModel==="fox_dhx"?'selected':''}>Fox DHX (muelle)</option>
+          <option value="deluxe" ${st.calcShockModel==="deluxe"?'selected':''}>RockShox Deluxe</option>
+          <option value="super_deluxe" ${st.calcShockModel==="super_deluxe"?'selected':''}>RockShox Super Deluxe</option>
+          <option value="vivid" ${st.calcShockModel==="vivid"?'selected':''}>RockShox Vivid</option>
+          <option value="other" ${st.calcShockModel==="other"?'selected':''}>Otro / no especificado</option>
+        </select>
+      </div>      <div>
+        <label class="zn"><b>Tipo de conducción / terreno:</b></label>
+        <select id="inp-riding">
+          <option value="xc" ${st.calcRiding==="xc"?'selected':''}>XC / competición</option>
+          <option value="trail" ${st.calcRiding==="trail"?'selected':''}>Trail / polivalente</option>
+          <option value="enduro" ${st.calcRiding==="enduro"?'selected':''}>Enduro</option>
+          <option value="tecnico" ${st.calcRiding==="tecnico"?'selected':''}>Técnico / terreno roto</option>
+          <option value="saltos" ${st.calcRiding==="saltos"?'selected':''}>Saltos</option>
+          <option value="drops" ${st.calcRiding==="drops"?'selected':''}>Drops / cortados</option>
+          <option value="escaleras" ${st.calcRiding==="escaleras"?'selected':''}>Escaleras / escalones</option>
+          <option value="descenso" ${st.calcRiding==="descenso"?'selected':''}>Descenso / bike park</option>
+        </select>
+      </div>    <div class="opts a3" style="margin-top:8px;">
+      <div><label class="zn"><b>Modelo de bicicleta:</b></label><input type="text" id="inp-frame-model" placeholder="Marca y modelo exacto" value="${esc(st.calcFrameModel)}"></div>
+      <div><label class="zn"><b>Año de horquilla:</b></label><select id="inp-fork-year">${Array.from({length:16},(_,i)=>2026-i).map(y=>`<option value="${y}" ${Number(st.calcForkYear)===y?'selected':''}>${y}</option>`).join("")}</select></div>
+      <div><label class="zn"><b>Año de amortiguador:</b></label><select id="inp-shock-year">${Array.from({length:16},(_,i)=>2026-i).map(y=>`<option value="${y}" ${Number(st.calcShockYear)===y?'selected':''}>${y}</option>`).join("")}</select></div>
+    </div>    <div class="opts" style="grid-template-columns:1fr 1fr; margin-bottom:16px;">
       <button class="opt ${st.calcSystem==='tubeless'?'sm':''}" data-a="setCalcSys" data-v="tubeless" aria-pressed="${st.calcSystem==='tubeless'}">
         <b>💧</b>Tubeless / Con Líquido
       </button>
@@ -955,6 +1039,12 @@ const vCalc=()=>{
       </button>
     </div>
 
+    ${isTubeless?`<label class="zn"><b>Protección interna tubeless:</b></label>
+    <div class="opts" style="grid-template-columns:repeat(3,1fr); margin:6px 0 16px;">
+      <button class="opt" data-a="setCalcInsert" data-v="none" aria-pressed="${st.calcInsert==='none'}">Sin protección</button>
+      <button class="opt" data-a="setCalcInsert" data-v="mousse" aria-pressed="${st.calcInsert==='mousse'}">Mousse</button>
+      <button class="opt" data-a="setCalcInsert" data-v="insert" aria-pressed="${st.calcInsert==='insert'}">Inserto</button>
+    </div>`:''}
     <h3 class="grp">Presión recomendada de neumáticos</h3>
     <div class="calc-grid">
       <div class="calc-result">
@@ -969,6 +1059,7 @@ const vCalc=()=>{
       </div>
     </div>
 
+    <p class="hint">${insertReductionPsi ? `Mousse / inserto: se han restado ${insertReductionPsi} PSI (${insertReductionBar.toFixed(2)} bar) a ambas ruedas como punto de partida.` : "Sin reducción por mousse/inserto."} Respeta siempre los límites de presión del neumático y la llanta.</p>
     <h3 class="grp" style="margin-top:20px;">Ajuste de amortiguador y horquilla de aire</h3>
     <div class="calc-grid">
       <div class="calc-result">
@@ -982,7 +1073,28 @@ const vCalc=()=>{
         <span class="sub">SAG sugerido: ${sagPercent}</span>
       </div>
     </div>
-    <p class="tip">Empieza siempre con estos valores de partida y afina un 5% arriba o abajo según tus sensaciones en ruta.</p>
+    <h3 class="grp" style="margin-top:20px;">Medidor de SAG con ciclista equipado</h3>
+    <p class="sub">Mide cuánto se hunde cada suspensión desde totalmente extendida hasta tu posición habitual sobre la bici. Para medir el amortiguador usa la carrera del vástago, no el recorrido de la rueda.</p>
+    <div class="opts a3">
+      <div><label class="zn"><b>SAG medido en horquilla (mm):</b></label><input type="number" id="sag-fork-measured" min="0" step="1" placeholder="Ej. 32" value="${st.forkSagMeasured}"></div>
+      <div><label class="zn"><b>SAG medido en amortiguador (mm):</b></label><input type="number" id="sag-shock-measured" min="0" step="1" placeholder="Ej. 18" value="${st.shockSagMeasured}"></div>
+    </div>
+    <div class="calc-grid">
+      <div class="calc-result"><small>SAG de horquilla</small><b>${forkSagPct}${forkSagValue?' %':''}</b><span class="sub">Objetivo aprox. ${targetForkSag}% de ${forkTravelForSag} mm (${(forkTravelForSag*targetForkSag/100).toFixed(0)} mm)</span><p class="zn">${sagAdvice(forkSagValue?Number(forkSagPct):0,targetForkSag)}</p></div>
+      <div class="calc-result"><small>SAG de amortiguador</small><b>${shockSagPct}${shockSagValue?' %':''}</b><span class="sub">Objetivo aprox. ${targetShockSag}% de ${Number(st.coilStroke)||60} mm (${((Number(st.coilStroke)||60)*targetShockSag/100).toFixed(0)} mm)</span><p class="zn">${sagAdvice(shockSagValue?Number(shockSagPct):0,targetShockSag)}</p></div>
+    </div>    <h3 class="grp" style="margin-top:20px;">Calculador de muelle helicoidal trasero</h3>
+    <p class="sub">Calcula una tasa inicial en función de la carga en la rueda trasera, la relación de palanca, la carrera y el SAG objetivo del amortiguador.</p>
+    <div class="opts a3">
+      <div><label class="zn"><b>Carga trasera (% del peso equipado):</b></label><input type="number" id="coil-rear" min="30" max="80" step="1" value="${st.coilRearLoad}"></div>
+      <div><label class="zn"><b>Relación de palanca (rueda / amortiguador):</b></label><input type="number" id="coil-leverage" min="1" max="5" step="0.01" value="${st.coilLeverage}"></div>
+      <div><label class="zn"><b>Carrera del amortiguador (mm):</b></label><input type="number" id="coil-stroke" min="25" max="90" step="0.5" value="${st.coilStroke}"></div>
+      <div><label class="zn"><b>SAG objetivo del amortiguador (%):</b></label><input type="number" id="coil-sag" min="20" max="40" step="1" value="${st.coilSag}"></div>
+    </div>
+    <div class="calc-grid">
+      <div class="calc-result"><small>Tasa calculada</small><b>${coilRateLb} lb/in</b><span class="sub">${coilRateN} N/mm</span></div>
+      <div class="calc-result"><small>Muelle comercial cercano</small><b>${coilNearest} lb/in</b><span class="sub">Confirma longitud, diámetro y compatibilidad con el amortiguador.</span></div>
+    </div>
+    <p class="tip">Estimación estática. Usa la carga real en la rueda trasera si puedes medirla y la relación de palanca del fabricante. El sistema de bieletas es progresivo; valida el muelle con el SAG y el recorrido, y verifica límites de presión y compatibilidad con el manual del amortiguador.</p>    <p class="tip">Estimación orientativa según peso, recorrido y estilo. Comprueba el SAG con tu equipo puesto y afina según la tabla del fabricante; el modelo exacto y la bici también influyen.</p>
   </section>`;
 };
 
@@ -1116,12 +1228,29 @@ const vBike=()=>{
   </section>`;
 };
 
+const vGarage=()=>{
+const groups=[["pre","Antes de cada salida",["Presion y cubiertas","Ejes y cierres","Frenos y pastillas","Direccion y manillar","Cadena y cambios","Suspension sin fugas"]],["park","Antes de bike park",["Pares criticos segun manual","Llantas, radios y cubiertas","Bieletas y bujes sin holgura","Frenos y protecciones","Suspension sin danos ni topes raros","Herramientas y repuestos"]],["new","Tras montar componentes",["Compatibilidad y medidas","Par de apriete fabricante","Recorrido libre sin interferencias","Latiguillos/cables sin tension","Prueba suave y revision posterior","Fecha y serie anotados"]]];
+const checklist=groups.map(g=>`<details class="r"><summary><span class="nm">${g[1]}</span></summary><div class="bd"><ul class="chk">${g[2].map((x,i)=>`<li><label><input type="checkbox" data-a="garageCheck" data-v="${g[0]}${i}" ${st.gChecks&&st.gChecks[g[0]+i]?"checked":""}><span>${x}</span></label></li>`).join("")}</ul></div></details>`).join("");
+const rides=(st.rideLog||[]).slice().reverse().map(r=>`<div class="rep-card"><b>${esc(r.name)}</b> ${esc(r.date)} · ${esc(r.km)} km · ${esc(r.terrain)}<p>${esc(r.notes)}</p></div>`).join("")||"<p>Sin rutas guardadas.</p>";
+const setups=(st.setupLog||[]).slice().reverse(),a=setups[0],b=setups[1];
+const tuneMap={"Se hunde al frenar":"Prueba un clic mas de LSC; confirma SAG primero.","Dura en baches":"Abre LSC un clic y revisa friccion/presion.","Falta soporte":"Prueba HSC un clic si el modelo la ofrece.","Se hunde en baches seguidos":"Abre rebote gradualmente.","Patada al extender":"Cierra rebote gradualmente.","Pierde traccion":"Revisa SAG y abre rebote poco a poco."};
+const diagMap={"Fuga":"Limpia y localiza la fuga; no desmontes elementos presurizados.","Golpe":"Descarta ejes, direccion y bieletas; golpe interno requiere servicio.","Crujido":"Aisla bieletas y tornillos; detente si hay fisura u holgura.","Hace tope":"Revisa SAG, muelle/presion y progresividad.","Friccion":"Revisa suciedad, alineacion, barras y retenes."};
+return `<section class="hero"><h2>Ruta, ficha y ajustes</h2><p class="sub">Herramientas integradas con tu ficha, calculadora e historial local.</p></section>
+<div class="seg" aria-label="Herramientas de bici"><button data-a="garageJump" data-v="garage-bike">Ficha</button><button data-a="garageJump" data-v="garage-rides">Rutas</button><button data-a="garageJump" data-v="garage-setup">Ajustes</button><button data-a="garageJump" data-v="garage-checks">Revisiones</button><button data-a="garageJump" data-v="garage-suspension">Suspensión</button><button data-a="garageJump" data-v="garage-export">Exportar</button></div>
+<section class="card" id="garage-bike"><h2>Ficha tecnica</h2><p>Bici: ${esc(st.m||"Sin especificar")} · ${esc(st.tipo)}<br>Horquilla ${esc(st.calcForkModel)} ${esc(st.calcForkYear)} · Amortiguador ${esc(st.calcShockModel)} ${esc(st.calcShockYear)}<br>Recorrido ${Number(st.calcSuspension)||"segun cuadro"} mm · Carrera ${esc(st.coilStroke)} mm · Leverage ${esc(st.coilLeverage)}</p><button class="btn g" data-a="tab" data-v="bike">Editar ficha</button></section>
+<section class="card" id="garage-rides"><h2>Diario de rutas</h2><div class="opts a3"><div><label class="zn">Ruta</label><input id="ride-name"></div><div><label class="zn">Fecha</label><input id="ride-date" type="date"></div><div><label class="zn">Distancia km</label><input id="ride-km" type="number"></div><div><label class="zn">Terreno</label><select id="ride-terrain"><option>Mixto</option><option>Rocoso</option><option>Bike park</option><option>Raices/humedo</option></select></div><div><label class="zn">Sensaciones y ajustes</label><input id="ride-notes"></div></div><button class="btn" data-a="saveRide">Guardar ruta</button><details class="r"><summary>Historial (${(st.rideLog||[]).length})</summary><div class="bd">${rides}</div></details></section>
+<section class="card" id="garage-setup"><h2>Comparar ajustes</h2><div class="opts a3"><div><label class="zn">Nombre</label><input id="set-name"></div><div><label class="zn">Horquilla PSI</label><input id="set-fork" type="number"></div><div><label class="zn">Amortiguador PSI</label><input id="set-shock" type="number"></div><div><label class="zn">Muelle lb/in</label><input id="set-spring" type="number"></div><div><label class="zn">Rebote/compresion</label><input id="set-clicks"></div><div><label class="zn">SAG/sensaciones</label><input id="set-notes"></div></div><button class="btn" data-a="saveSetup">Guardar ajuste</button>${a&&b?`<h3 class="grp">Comparación de los dos últimos ajustes</h3><table class="loc"><tr><th>Parámetro</th><th>${esc(a.name)}</th><th>${esc(b.name)}</th></tr><tr><th>Horquilla PSI</th><td>${esc(a.fork)}</td><td>${esc(b.fork)}</td></tr><tr><th>Amortiguador PSI</th><td>${esc(a.shock)}</td><td>${esc(b.shock)}</td></tr><tr><th>Muelle lb/in</th><td>${esc(a.spring)}</td><td>${esc(b.spring)}</td></tr><tr><th>Rebote / compresión</th><td>${esc(a.clicks)}</td><td>${esc(b.clicks)}</td></tr><tr><th>Sensaciones</th><td>${esc(a.notes)}</td><td>${esc(b.notes)}</td></tr></table>`:"Guarda dos ajustes para compararlos."}${setups.map(x=>`<div class="rep-card"><b>${esc(x.name)}</b> · Horquilla ${esc(x.fork)} PSI · Shock ${esc(x.shock)} PSI · Muelle ${esc(x.spring)} lb/in · ${esc(x.clicks)} · ${esc(x.notes)}</div>`).join("")}</section>
+<section class="card" id="garage-checks"><h2>Comprobaciones</h2><p class="sub">Marca antes de salir, bike park o tras montar piezas.</p>${checklist}</section>
+<section class="card" id="garage-suspension"><h2>Asistente de compresion y rebote</h2><select id="tune-symptom">${Object.keys(tuneMap).map(k=>`<option ${st.tuneSymptom===k?"selected":""}>${k}</option>`).join("")}</select><p class="hint">${tuneMap[st.tuneSymptom]||tuneMap["Se hunde al frenar"]} Un clic cada vez; confirma manual del modelo.</p></section>
+<section class="card" id="garage-diagnosis"><h2>Diagnostico de suspension</h2><select id="diag-symptom">${Object.keys(diagMap).map(k=>`<option ${st.diagSusp===k?"selected":""}>${k}</option>`).join("")}</select><p class="hint">${diagMap[st.diagSusp]||diagMap.Fuga}</p></section>
+<section class="card" id="garage-export"><h2>Exportar</h2><div class="data-box"><button class="btn" data-a="exportData">Exportar datos JSON</button></div></section>`;
+};
 function render(){
-const VALID_TABS=["home","noise","audio","sos","shop","calc","bike"];if(!VALID_TABS.includes(st.tab))st.tab="home";
+const VALID_TABS=["home","noise","audio","sos","shop","calc","garage","bike"];if(!VALID_TABS.includes(st.tab))st.tab="home";
 document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current",b.dataset.v===st.tab));
 document.getElementById("mine").textContent=[st.m,st.tipo].filter(Boolean).join(" · ");
 document.querySelectorAll(".theme-pill").forEach(p=>p.setAttribute("aria-pressed",p.dataset.v===st.theme));
-app.innerHTML=({home:vHome,noise:vNoise,audio:vAudio,sos:vSos,shop:vShop,calc:vCalc,bike:vBike})[st.tab]();
+app.innerHTML=({home:vHome,noise:vNoise,audio:vAudio,sos:vSos,shop:vShop,calc:vCalc,garage:vGarage,bike:vBike})[st.tab]();
 }
 
 const go=()=>{render();scrollTo(0,0)};
@@ -1145,6 +1274,7 @@ window.addEventListener('beforeinstallprompt', e => {
 
 const act={
 tab(el){st.tab=el.dataset.v;go()},
+garageJump(el){document.getElementById(el.dataset.v)?.scrollIntoView({behavior:"smooth",block:"start"})},
 toBolts(){st.tab="noise";st.nv="res";st.sub="tornillos";go()},
 sub(el){st.sub=el.dataset.v;go()},
 setTheme(el){
@@ -1170,8 +1300,12 @@ startMic(){startMic()},
 stopMic(){stopMic()},
 playSynth(el){playSynth(el.dataset.v)},
 setCalcSys(el){st.calcSystem=el.dataset.v;render()},
+setCalcInsert(el){st.calcInsert=el.dataset.v;render()},
+garageCheck(el){st.gChecks=st.gChecks||{};st.gChecks[el.dataset.v]=el.checked;ls.set("bici-garage",{rideLog:st.rideLog||[],setupLog:st.setupLog||[],gChecks:st.gChecks})},
+saveRide(){const q=id=>document.getElementById(id)?.value||"";st.rideLog=st.rideLog||[];st.rideLog.push({name:q("ride-name")||"Ruta",date:q("ride-date"),km:q("ride-km"),terrain:q("ride-terrain"),notes:q("ride-notes")});ls.set("bici-garage",{rideLog:st.rideLog,setupLog:st.setupLog||[],gChecks:st.gChecks||{}});render()},
+saveSetup(){const q=id=>document.getElementById(id)?.value||"";st.setupLog=st.setupLog||[];st.setupLog.push({name:q("set-name")||"Ajuste",fork:q("set-fork"),shock:q("set-shock"),spring:q("set-spring"),clicks:q("set-clicks"),notes:q("set-notes")});ls.set("bici-garage",{rideLog:st.rideLog||[],setupLog:st.setupLog,gChecks:st.gChecks||{}});render()},
 exportData(){
-  const blob=new Blob([JSON.stringify({perfil:{m:st.m,tipo:st.tipo,shock:st.shock,fork:st.fork,drivetrain:st.drivetrain,fr:st.fr,theme:st.theme},hechos:st.done},null,2)],{type:"application/json"});
+  const blob=new Blob([JSON.stringify({perfil:{m:st.m,tipo:st.tipo,shock:st.shock,fork:st.fork,drivetrain:st.drivetrain,fr:st.fr,theme:st.theme},hechos:st.done,rutas:st.rideLog,ajustes:st.setupLog,gChecks:st.gChecks},null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="mi-bici-taller.json";a.click();
 },
 importData(){
@@ -1189,7 +1323,7 @@ importData(){
           st.theme=d.perfil.theme||"mint";
           document.documentElement.setAttribute("data-style",st.theme);save();
         }
-        if(d.hechos){st.done=d.hechos;ls.set("bici-hechos",st.done);}
+        if(d.hechos){st.done=d.hechos;ls.set("bici-hechos",st.done);}if(d.rutas)st.rideLog=d.rutas;if(d.ajustes)st.setupLog=d.ajustes;if(d.gChecks)st.gChecks=d.gChecks;
         alert("Datos importados con éxito");go();
       }catch(err){alert("Archivo no válido");}
     };
@@ -1235,13 +1369,26 @@ document.body.addEventListener("input",e=>{
  if(e.target.id==="inp-w"){st.calcWeight=e.target.value;render();}
 });
 
-document.body.addEventListener("change",e=>{
+document.body.addEventListener("change",e=>{if(e.target.id==="tune-symptom"){st.tuneSymptom=e.target.value;saveGarage();render()}if(e.target.id==="diag-symptom"){st.diagSusp=e.target.value;saveGarage();render()}
   if(e.target.id==="sel-tipo"){st.tipo=e.target.value;save();render();}
   if(e.target.id==="sel-shock"){st.shock=e.target.value;save();}
   if(e.target.id==="sel-fork"){st.fork=e.target.value;save();}
   if(e.target.id==="sel-drivetrain"){st.drivetrain=e.target.value;save();}
   if(e.target.id==="inp-bike"){st.calcBike=e.target.value;render();}
   if(e.target.id==="inp-width"){st.calcWidth=e.target.value;render();}
+  if(e.target.id==="inp-suspension"){st.calcSuspension=e.target.value;render();}
+  if(e.target.id==="inp-riding"){st.calcRiding=e.target.value;render();}
+  if(e.target.id==="inp-fork-model"){st.calcForkModel=e.target.value;render();}
+  if(e.target.id==="inp-shock-model"){st.calcShockModel=e.target.value;render();}
+  if(e.target.id==="inp-fork-year"){st.calcForkYear=Number(e.target.value);render();}
+  if(e.target.id==="inp-shock-year"){st.calcShockYear=Number(e.target.value);render();}
+  if(e.target.id==="inp-frame-model"){st.calcFrameModel=e.target.value;render();}
+  if(e.target.id==="coil-rear"){st.coilRearLoad=e.target.value;render();}
+  if(e.target.id==="coil-leverage"){st.coilLeverage=e.target.value;render();}
+  if(e.target.id==="coil-stroke"){st.coilStroke=e.target.value;render();}
+  if(e.target.id==="coil-sag"){st.coilSag=e.target.value;render();}
+  if(e.target.id==="sag-fork-measured"){st.forkSagMeasured=e.target.value;render();}
+  if(e.target.id==="sag-shock-measured"){st.shockSagMeasured=e.target.value;render();}
 });
 
 render();
